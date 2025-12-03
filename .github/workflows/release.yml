@@ -41,7 +41,7 @@ jobs:
           echo "✅ Found spec file: $SPEC"
           pyinstaller "$SPEC"
 
-      - name: Debug: show dist contents
+      - name: show dist contents
         run: ls -la dist/
 
       - name: Upload raw dist directory as artifact
