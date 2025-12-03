@@ -1,0 +1,76 @@
+# .github/workflows/release.yml
+name: Release Executables
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'  # 只有打 tag 时才触发发布（如 v1.0.0, v2.1.3）
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ["3.11"]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Install PyInstaller
+        run: |
+          pip install pyinstaller
+
+      - name: Build executable
+        run: |
+          pyinstaller main.spec
+
+      - name: Rename executable for clarity (optional but recommended)
+        shell: bash
+        run: |
+          cd dist
+          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+            mv main.exe myapp-windows.exe
+          elif [[ "${{ matrix.os }}" == "macos-latest" ]]; then
+            mv main myapp-macos
+          else
+            mv main myapp-linux
+          fi
+
+      - name: Upload artifact for release
+        uses: actions/upload-artifact@v4
+        with:
+          name: myapp-${{ matrix.os }}
+          path: dist/
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Flatten and rename files (optional cleanup)
+        run: |
+          mkdir -p release-assets
+          find artifacts -type f \( -name "myapp-*" \) -exec cp {} release-assets/ \;
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
