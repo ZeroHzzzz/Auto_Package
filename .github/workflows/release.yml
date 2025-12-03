@@ -29,10 +29,12 @@ jobs:
       - name: Install PyInstaller
         run: pip install pyinstaller
 
-      - name: Find and build .spec file
-        id: build
+      - name: Find and build .spec file (Linux/Mac)
+        if: matrix.os != 'windows-latest'
+        shell: bash
+        id: build-unix
         run: |
-          # 查找根目录下唯一的 .spec 文件
+          # 查找根目录下唯一的 .spec 文件（Linux / macOS）
           SPEC=$(find . -maxdepth 1 -name "*.spec" | head -n1)
           if [[ -z "$SPEC" ]]; then
             echo "❌ Error: No .spec file found in repository root!"
@@ -40,6 +42,21 @@ jobs:
           fi
           echo "✅ Found spec file: $SPEC"
           pyinstaller "$SPEC"
+
+      - name: Find and build .spec file (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        id: build-windows
+        run: |
+          # 查找根目录下唯一的 .spec 文件（Windows PowerShell）
+          $specObj = Get-ChildItem -Path . -Filter '*.spec' -File | Select-Object -First 1
+          if (-not $specObj) {
+            Write-Error "❌ Error: No .spec file found in repository root!"
+            exit 1
+          }
+          $spec = $specObj.Name
+          Write-Host "✅ Found spec file: $spec"
+          pyinstaller $spec
 
       - name: show dist contents
         run: ls -la dist/
