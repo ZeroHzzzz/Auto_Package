@@ -4,7 +4,7 @@ name: Release Executables
 on:
   push:
     tags:
-      - 'v*.*.*'  # 只有打 tag 时才触发发布（如 v1.0.0, v2.1.3）
+      - 'v*.*.*'
 
 jobs:
   build:
@@ -32,41 +32,65 @@ jobs:
         run: |
           pip install pyinstaller
 
-      - name: Build executable
+      - name: Find and build .spec file
+        id: find_spec
         run: |
-          pyinstaller main.spec
-
-      - name: Rename executable for clarity (optional but recommended)
-        shell: bash
-        run: |
-          cd dist
-          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
-            mv main.exe myapp-windows.exe
-          elif [[ "${{ matrix.os }}" == "macos-latest" ]]; then
-            mv main myapp-macos
-          else
-            mv main myapp-linux
+          SPEC_FILE=$(find . -maxdepth 1 -name "*.spec" | head -n 1)
+          if [ -z "$SPEC_FILE" ]; then
+            echo "Error: No .spec file found in repository root!"
+            exit 1
           fi
+          echo "Found spec file: $SPEC_FILE"
+          echo "spec_file=${SPEC_FILE}" >> $GITHUB_OUTPUT
+          pyinstaller "$SPEC_FILE"
 
-      - name: Upload artifact for release
+      - name: Debug: list dist contents
+        run: |
+          ls -la dist/
+
+      - name: Upload dist as artifact
         uses: actions/upload-artifact@v4
         with:
-          name: myapp-${{ matrix.os }}
+          name: dist-${{ matrix.os }}
           path: dist/
+          if-no-files-found: error
 
   release:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - name: Download all artifacts
+      - name: Download all dist artifacts
         uses: actions/download-artifact@v4
         with:
-          path: artifacts/
+          path: downloaded/
 
-      - name: Flatten and rename files (optional cleanup)
+      - name: Flatten artifacts into release-assets/
         run: |
           mkdir -p release-assets
-          find artifacts -type f \( -name "myapp-*" \) -exec cp {} release-assets/ \;
+          # 遍历每个平台的 dist 目录，把里面所有文件移到 release-assets/
+          for os_dir in downloaded/dist-*; do
+            if [ -d "$os_dir" ]; then
+              # 获取平台名，如 dist-ubuntu-latest → ubuntu-latest
+              platform=${os_dir#downloaded/dist-}
+              # 为每个文件加上平台后缀，避免重名
+              for file in "$os_dir"/*; do
+                if [ -f "$file" ]; then
+                  filename=$(basename "$file")
+                  # 如果是 Windows，保留 .exe；其他平台加后缀区分
+                  if [[ "$platform" == "windows-latest" ]]; then
+                    cp "$file" "release-assets/${filename%.*}-windows.exe"
+                  elif [[ "$platform" == "macos-latest" ]]; then
+                    cp "$file" "release-assets/${filename%.*}-macos"
+                  else
+                    cp "$file" "release-assets/${filename%.*}-linux"
+                  fi
+                fi
+              done
+            fi
+          done
+
+      - name: List release assets
+        run: ls -la release-assets/
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
