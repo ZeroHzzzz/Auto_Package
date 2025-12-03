@@ -58,8 +58,23 @@ jobs:
           Write-Host "✅ Found spec file: $spec"
           pyinstaller $spec
 
-      - name: show dist contents
-        run: ls -la dist/
+      - name: Show dist contents (Linux/Mac)
+        if: matrix.os != 'windows-latest'
+        shell: bash
+        run: |
+          echo "Contents of dist:"
+          ls -la dist/ || true
+
+      - name: Show dist contents (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          Write-Host "Contents of dist:"
+          if (Test-Path -Path dist) {
+            Get-ChildItem -Path dist -Force | Format-Table -AutoSize
+          } else {
+            Write-Host "dist directory not found"
+          }
 
       - name: Upload raw dist directory as artifact
         uses: actions/upload-artifact@v4
