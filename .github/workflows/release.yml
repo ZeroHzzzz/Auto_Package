@@ -1,10 +1,9 @@
-# .github/workflows/release.yml
 name: Release Executables
 
 on:
   push:
     tags:
-      - 'v*.*.*'
+      - 'v*.*.*'  # 仅当推送符合 v1.2.3 格式的 tag 时触发
 
 jobs:
   build:
@@ -12,7 +11,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ["3.11"]
+        python-version: ["3.11"]  # 可根据项目调整
 
     steps:
       - name: Checkout code
@@ -24,31 +23,28 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
 
-      - name: Install dependencies
-        run: |
-          pip install -r requirements.txt
+      - name: Install project dependencies
+        run: pip install -r requirements.txt
 
       - name: Install PyInstaller
-        run: |
-          pip install pyinstaller
+        run: pip install pyinstaller
 
       - name: Find and build .spec file
-        id: find_spec
+        id: build
         run: |
-          SPEC_FILE=$(find . -maxdepth 1 -name "*.spec" | head -n 1)
-          if [ -z "$SPEC_FILE" ]; then
-            echo "Error: No .spec file found in repository root!"
+          # 查找根目录下唯一的 .spec 文件
+          SPEC=$(find . -maxdepth 1 -name "*.spec" | head -n1)
+          if [[ -z "$SPEC" ]]; then
+            echo "❌ Error: No .spec file found in repository root!"
             exit 1
           fi
-          echo "Found spec file: $SPEC_FILE"
-          echo "spec_file=${SPEC_FILE}" >> $GITHUB_OUTPUT
-          pyinstaller "$SPEC_FILE"
+          echo "✅ Found spec file: $SPEC"
+          pyinstaller "$SPEC"
 
-      - name: Debug: list dist contents
-        run: |
-          ls -la dist/
+      - name: Debug: show dist contents
+        run: ls -la dist/
 
-      - name: Upload dist as artifact
+      - name: Upload raw dist directory as artifact
         uses: actions/upload-artifact@v4
         with:
           name: dist-${{ matrix.os }}
@@ -58,39 +54,57 @@ jobs:
   release:
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # 必须显式授权才能创建 release
+
     steps:
-      - name: Download all dist artifacts
+      - name: Download all platform artifacts
         uses: actions/download-artifact@v4
         with:
-          path: downloaded/
+          path: artifacts/
 
-      - name: Flatten artifacts into release-assets/
+      - name: Add platform suffixes and collect release assets
         run: |
           mkdir -p release-assets
-          # 遍历每个平台的 dist 目录，把里面所有文件移到 release-assets/
-          for os_dir in downloaded/dist-*; do
-            if [ -d "$os_dir" ]; then
-              # 获取平台名，如 dist-ubuntu-latest → ubuntu-latest
-              platform=${os_dir#downloaded/dist-}
-              # 为每个文件加上平台后缀，避免重名
-              for file in "$os_dir"/*; do
-                if [ -f "$file" ]; then
-                  filename=$(basename "$file")
-                  # 如果是 Windows，保留 .exe；其他平台加后缀区分
-                  if [[ "$platform" == "windows-latest" ]]; then
-                    cp "$file" "release-assets/${filename%.*}-windows.exe"
-                  elif [[ "$platform" == "macos-latest" ]]; then
-                    cp "$file" "release-assets/${filename%.*}-macos"
-                  else
-                    cp "$file" "release-assets/${filename%.*}-linux"
-                  fi
-                fi
-              done
+
+          for artifact_dir in artifacts/dist-*; do
+            if [[ ! -d "$artifact_dir" ]]; then
+              continue
             fi
+
+            # 提取平台名：dist-ubuntu-latest → ubuntu-latest
+            platform=${artifact_dir#artifacts/dist-}
+
+            echo "📦 Processing platform: $platform"
+
+            # 遍历 dist 目录中的每一个文件
+            for file in "$artifact_dir"/*; do
+              if [[ ! -f "$file" ]]; then
+                continue
+              fi
+
+              basename_file=$(basename "$file")
+              name_without_ext="${basename_file%.*}"
+              ext="${basename_file##*.}"
+
+              # 特殊处理：Windows 原本就是 .exe，其他平台无扩展名
+              if [[ "$platform" == "windows-latest" ]]; then
+                new_name="${name_without_ext}-windows.exe"
+              elif [[ "$platform" == "macos-latest" ]]; then
+                new_name="${name_without_ext}-macos"
+              else  # ubuntu-latest etc.
+                new_name="${name_without_ext}-linux"
+              fi
+
+              echo "  → Renaming $basename_file → $new_name"
+              cp "$file" "release-assets/$new_name"
+            done
           done
 
-      - name: List release assets
-        run: ls -la release-assets/
+      - name: List final release assets
+        run: |
+          echo "📁 Final assets to release:"
+          ls -la release-assets/
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
